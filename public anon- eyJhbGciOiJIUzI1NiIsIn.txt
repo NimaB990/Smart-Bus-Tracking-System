@@ -1,0 +1,3 @@
+public anon- eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrb2Jmb2V5cGF6c3pmdGJua21iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA4Njc1MzAsImV4cCI6MjA3NjQ0MzUzMH0.AdkoAaSAL-RK6kH3fTa7vKf5gLNkS03qqp8XvR97ccE
+
+url-https://qkobfoeypazszftbnkmb.supabase.co
