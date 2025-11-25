@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Smart Bus Tracking Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      background: #f4f6fb;
+      color: #222;
+    }
+    .dashboard {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: #2d3748;
+      color: #fff;
+      width: 260px;
+      padding: 30px 20px;
+      box-shadow: 2px 0 8px rgba(0,0,0,0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+    .sidebar h2 {
+      font-size: 1.3em;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+    }
+    .sidebar select {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 1em;
+      margin-bottom: 10px;
+    }
+    .main {
+      flex: 1;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+    #map {
+      height: 500px;
+      width: 100%;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .panel {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 24px;
+      min-width: 320px;
+      max-width: 400px;
+      margin-bottom: 10px;
+      transition: box-shadow 0.2s;
+    }
+    .panel h3 {
+      margin-top: 0;
+      font-size: 1.1em;
+      color: #2d3748;
+    }
+    .bus-list {
+      margin-top: 10px;
+    }
+    .bus-list select {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+      font-size: 1em;
+    }
+    .bus-info {
+      margin-top: 10px;
+      font-size: 1em;
+    }
+    .fa-bus {
+      color: #3182ce;
+      margin-right: 8px;
+    }
+    @media (max-width: 900px) {
+      .dashboard { flex-direction: column; }
+      .sidebar { width: 100%; flex-direction: row; gap: 20px; }
+      .main { padding: 20px; }
+      #map { height: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <div class="sidebar">
+      <div>
+        <h2><i class="fa-solid fa-route"></i> Select Route</h2>
+        <select id="routeSelect" onchange="showBuses()"></select>
+      </div>
+      <div class="panel">
+        <h3><i class="fa-solid fa-bus"></i> Available Buses</h3>
+        <div class="bus-list">
+          <select id="busSelect" onchange="selectBus()"></select>
+          <button id="trackAllBtn" onclick="trackAllBuses()" style="margin-top: 10px; padding: 8px 15px; background: #3182ce; color: white; border: none; border-radius: 5px; cursor: pointer; width: 100%;">Track All Buses</button>
+        </div>
+        <div class="bus-info" id="busDetails"></div>
+      </div>
+      <div class="panel">
+        <h3><i class="fa-solid fa-info-circle"></i> Bus Status</h3>
+        <div id="realTimeStatus" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+          <div id="selectedBusStatus">Select a bus to see real-time status</div>
+        </div>
+      </div>
+    </div>
+    <div class="main">
+      <div id="map"></div>
+    </div>
+  </div>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // Example static data (replace with API calls)
+    const routes = {
+      1: { name: "Kandy to Colombo" },
+      2: { name: "Colombo to Galle" },
+      3: { name: "Colombo to Negombo" },
+      4: { name: "Kandy to Nuwara Eliya" }
+    };
+    const buses = {
+      1: { bus_number: "NB-1234", route_id: 1, details: "AC Bus" },
+      2: { bus_number: "NB-5678", route_id: 2, details: "Normal Bus" },
+      3: { bus_number: "NB-9012", route_id: 3, details: "Express" },
+      4: { bus_number: "NB-3456", route_id: 4, details: "Mountain Line" }
+    };
+    const routeCoords = {
+      1: [
+        [7.2906, 80.6337], [7.3055, 80.6290], [7.2592, 80.6220], [7.2380, 80.5505],
+        [7.2560, 80.5121], [7.2591, 80.5339], [7.2711, 80.5986], [7.2551, 80.4444],
+        [7.2519, 80.3464], [7.2319, 80.0704], [7.2620, 80.0350], [7.1497, 80.0110],
+        [7.0014, 79.9538], [6.9787, 79.9309], [6.9672, 79.8841], [6.9330, 79.8500]
+      ],
+      2: [
+        [6.9330, 79.8500], [6.8500, 79.9000], [6.7900, 79.9000], [6.7000, 79.9000], [6.0500, 80.2200]
+      ],
+      3: [
+        [6.9330, 79.8500], [6.9890, 79.8890], [7.0749, 79.8912], [7.1686, 79.8846], [7.2086, 79.8350]
+      ],
+      4: [
+        [7.2906, 80.6337], [7.2711, 80.5986], [7.1648, 80.5696], [7.0547, 80.6429], [6.9707, 80.7829]
+      ]
+    };
+    const busLocations = {
+      1: { lat: 7.2906, lng: 80.6337, route_id: 1 },
+      2: { lat: 6.9330, lng: 79.8500, route_id: 2 }
+    };
+
+    // Populate route dropdown
+    const routeSelect = document.getElementById('routeSelect');
+    for (const id in routes) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.text = routes[id].name;
+      routeSelect.appendChild(option);
+    }
+
+    // Leaflet map setup
+    const map = L.map('map').setView([7.2906, 80.6337], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let routeLine;
+    let busMarkers = [];
+    let busState = {}; // { busId: marker }
+    let pollingInterval = null;
+    let statusPollingInterval = null;
+    let currentRouteId = null;
+    let selectedBusId = null;
+    let trackingAllBuses = false;
+
+    // Initialize Supabase
+    const supabaseUrl = 'https://qkobfoeypazszftbnkmb.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrb2Jmb2V5cGF6c3pmdGJua21iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA4Njc1MzAsImV4cCI6MjA3NjQ0MzUzMH0.AdkoAaSAL-RK6kH3fTa7vKf5gLNkS03qqp8XvR97ccE';
+    const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+    function drawRoute(routeId) {
+      if (routeLine) {
+        map.removeLayer(routeLine);
+      }
+      routeLine = L.polyline(routeCoords[routeId], { color: '#3182ce', weight: 5 }).addTo(map);
+      map.fitBounds(routeLine.getBounds());
+    }
+
+    function showBusMarkers(routeId) {
+      // remove old markers
+      for (const k in busState) {
+        map.removeLayer(busState[k]);
+      }
+      busState = {};
+      busMarkers.forEach(m => map.removeLayer(m));
+      busMarkers = [];
+
+      // create markers for buses assigned to this route
+      for (const id in buses) {
+        if (buses[id].route_id == routeId) {
+          const isSelected = selectedBusId == id;
+          const marker = L.marker([0, 0], {  // initial position, will be updated by polling
+            icon: L.divIcon({
+              className: `custom-bus-icon ${isSelected ? 'bus-marker-selected' : ''}`,
+              html: `<i class="fa-solid fa-bus fa-2x" style="color:${isSelected ? '#e53e3e' : '#3182ce'}; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));"></i>`,
+              iconSize: [40, 40],
+              iconAnchor: [20, 20]
+            }),
+            title: buses[id].bus_number
+          }).addTo(map).bindPopup(`<strong>Bus ${buses[id].bus_number}</strong><br>${buses[id].details}<br><button onclick="selectBusById(${id})" style="margin-top:5px;padding:5px 10px;background:#3182ce;color:white;border:none;border-radius:3px;cursor:pointer;">Track This Bus</button>`);
+
+          // Add click handler to marker
+          marker.on('click', function() {
+            selectBusById(id);
+          });
+
+          busMarkers.push(marker);
+          busState[id] = marker;
+        }
+      }
+    }
+
+    async function pollBusPositions(routeId) {
+      try {
+        // Fetch bus_status for buses on this route
+        const busIds = Object.keys(buses).filter(id => buses[id].route_id == routeId);
+        if (busIds.length === 0) return;
+
+        const { data, error } = await supabase
+          .from('bus_status')
+          .select('bus_id, current_latitude, current_longitude')
+          .in('bus_id', busIds)
+          .eq('is_running', true);
+
+        if (error) {
+          console.error('Error fetching bus positions:', error);
+          return;
+        }
+
+        // Update marker positions
+        data.forEach(bus => {
+          const marker = busState[bus.bus_id];
+          if (marker && bus.current_latitude && bus.current_longitude) {
+            marker.setLatLng([bus.current_latitude, bus.current_longitude]);
+          }
+        });
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }
+
+    function startPolling(routeId) {
+      // clear existing interval
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+      }
+      currentRouteId = routeId;
+      // poll every 2 seconds
+      pollingInterval = setInterval(() => pollBusPositions(routeId), 2000);
+    }
+
+    function startStatusPolling() {
+      if (statusPollingInterval) {
+        clearInterval(statusPollingInterval);
+      }
+      statusPollingInterval = setInterval(updateRealTimeStatus, 3000);
+      updateRealTimeStatus(); // immediate update
+    }
+
+    async function updateRealTimeStatus() {
+      const statusDiv = document.getElementById('selectedBusStatus');
+      
+      if (selectedBusId) {
+        try {
+          const { data, error } = await supabase
+            .from('bus_status')
+            .select('*')
+            .eq('bus_id', selectedBusId)
+            .single();
+
+          if (error || !data) {
+            statusDiv.innerHTML = `
+              <div class="status-item">
+                <span class="status-label">Bus:</span> <span class="status-value">${buses[selectedBusId].bus_number}</span>
+              </div>
+              <div class="status-item">
+                <span class="status-label">Status:</span> <span class="status-value" style="color: #e53e3e;">No GPS Data</span>
+              </div>
+            `;
+            return;
+          }
+
+          const lastUpdate = data.last_movement_time ? new Date(data.last_movement_time).toLocaleTimeString() : 'Unknown';
+          const isMoving = data.is_moving ? '🟢 Moving' : '🔴 Stopped';
+          const isRunning = data.is_running ? '🟢 Active' : '🔴 Inactive';
+          
+          statusDiv.innerHTML = `
+            <div class="status-item">
+              <span class="status-label">Bus:</span> <span class="status-value">${buses[selectedBusId].bus_number}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Status:</span> <span class="status-value">${isRunning}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Movement:</span> <span class="status-value">${isMoving}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Position:</span> <span class="status-value">${data.current_latitude?.toFixed(4) || 'N/A'}, ${data.current_longitude?.toFixed(4) || 'N/A'}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Last Update:</span> <span class="status-value">${lastUpdate}</span>
+            </div>
+          `;
+        } catch (err) {
+          statusDiv.innerHTML = `<div style="color: #e53e3e;">Error loading status: ${err.message}</div>`;
+        }
+      } else if (trackingAllBuses && currentRouteId) {
+        try {
+          const busIds = Object.keys(buses).filter(id => buses[id].route_id == currentRouteId);
+          const { data, error } = await supabase
+            .from('bus_status')
+            .select('*')
+            .in('bus_id', busIds);
+
+          if (error) {
+            statusDiv.innerHTML = `<div style="color: #e53e3e;">Error loading status</div>`;
+            return;
+          }
+
+          const activeBuses = data?.filter(b => b.is_running).length || 0;
+          const movingBuses = data?.filter(b => b.is_moving).length || 0;
+          
+          statusDiv.innerHTML = `
+            <div class="status-item">
+              <span class="status-label">Route:</span> <span class="status-value">${routes[currentRouteId].name}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Total Buses:</span> <span class="status-value">${busIds.length}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Active:</span> <span class="status-value">🟢 ${activeBuses}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Moving:</span> <span class="status-value">🚌 ${movingBuses}</span>
+            </div>
+          `;
+        } catch (err) {
+          statusDiv.innerHTML = `<div style="color: #e53e3e;">Error loading status</div>`;
+        }
+      } else {
+        statusDiv.innerHTML = 'Select a bus or track all buses to see real-time status';
+      }
+    }
+
+    function stopPolling() {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+      }
+      if (statusPollingInterval) {
+        clearInterval(statusPollingInterval);
+        statusPollingInterval = null;
+      }
+    }
+
+    function selectBus() {
+      const busSelect = document.getElementById('busSelect');
+      const busId = busSelect.value;
+      if (busId) {
+        selectBusById(parseInt(busId));
+      }
+    }
+
+    function selectBusById(busId) {
+      selectedBusId = busId;
+      trackingAllBuses = false;
+      updateBusDetails();
+      updateBusMarkers();
+      startStatusPolling();
+      
+      // Update dropdown selection
+      const busSelect = document.getElementById('busSelect');
+      busSelect.value = busId;
+      
+      // Focus map on selected bus if it has a position
+      if (busState[busId]) {
+        const marker = busState[busId];
+        const pos = marker.getLatLng();
+        if (pos.lat !== 0 || pos.lng !== 0) {
+          map.setView([pos.lat, pos.lng], 13);
+        }
+      }
+    }
+
+    function trackAllBuses() {
+      selectedBusId = null;
+      trackingAllBuses = true;
+      updateBusDetails();
+      updateBusMarkers();
+      startStatusPolling();
+      
+      // Reset dropdown selection
+      const busSelect = document.getElementById('busSelect');
+      busSelect.value = '';
+      
+      // Fit map to show all buses
+      if (currentRouteId && routeCoords[currentRouteId]) {
+        const bounds = L.latLngBounds(routeCoords[currentRouteId]);
+        map.fitBounds(bounds);
+      }
+    }
+
+    function updateBusDetails() {
+      const busDetailsDiv = document.getElementById('busDetails');
+      if (selectedBusId && buses[selectedBusId]) {
+        const bus = buses[selectedBusId];
+        busDetailsDiv.innerHTML = `
+          <div style="background: #e2e8f0; padding: 10px; border-radius: 5px; margin-top: 10px;">
+            <strong>🚌 ${bus.bus_number}</strong><br>
+            <strong>Route:</strong> ${routes[bus.route_id].name}<br>
+            <strong>Type:</strong> ${bus.details}<br>
+            <div style="margin-top: 8px; font-size: 0.9em; color: #4a5568;">
+              📍 Tracking individual bus
+            </div>
+          </div>
+        `;
+      } else if (trackingAllBuses) {
+        const routeBuses = Object.values(buses).filter(b => b.route_id == currentRouteId);
+        busDetailsDiv.innerHTML = `
+          <div style="background: #e2e8f0; padding: 10px; border-radius: 5px; margin-top: 10px;">
+            <strong>🚌 All Buses</strong><br>
+            <strong>Route:</strong> ${routes[currentRouteId].name}<br>
+            <strong>Count:</strong> ${routeBuses.length} buses<br>
+            <div style="margin-top: 8px; font-size: 0.9em; color: #4a5568;">
+              📍 Tracking all buses on route
+            </div>
+          </div>
+        `;
+      } else {
+        busDetailsDiv.innerHTML = '<em>Select a bus to see details or track all buses.</em>';
+      }
+    }
+
+    function updateBusMarkers() {
+      // Update marker colors based on selection
+      for (const id in busState) {
+        const marker = busState[id];
+        const isSelected = selectedBusId == id;
+        const color = isSelected ? '#e53e3e' : (trackingAllBuses ? '#38a169' : '#3182ce');
+        const zIndex = isSelected ? 1000 : 100;
+        
+        marker.setIcon(L.divIcon({
+          className: `custom-bus-icon ${isSelected ? 'bus-marker-selected' : ''}`,
+          html: `<i class="fa-solid fa-bus fa-2x" style="color:${color}; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3)); z-index:${zIndex};"></i>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20]
+        }));
+      }
+    }
+
+    function showBuses() {
+      const selectedRoute = parseInt(routeSelect.value, 10);
+      const busSelect = document.getElementById('busSelect');
+      
+      // Reset selection state
+      selectedBusId = null;
+      trackingAllBuses = false;
+      
+      // Notify Python simulation about route selection
+      updateRouteSelection(selectedRoute);
+      
+      // Populate bus dropdown
+      busSelect.innerHTML = '<option value="">Select a bus...</option>';
+      for (const id in buses) {
+        if (buses[id].route_id === selectedRoute) {
+          const option = document.createElement('option');
+          option.value = id;
+          option.text = buses[id].bus_number;
+          busSelect.appendChild(option);
+        }
+      }
+      
+      drawRoute(selectedRoute);
+      showBusMarkers(selectedRoute);
+      startPolling(selectedRoute);
+      updateBusDetails();
+      startStatusPolling();
+    }
+
+    async function updateRouteSelection(routeId) {
+      try {
+        // Send route selection to local server
+        const response = await fetch('http://localhost:3001/set-route', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ routeId: routeId })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          console.log(`📱 Route ${routeId} activated successfully`);
+          showNotification(`✅ Route ${routeId} Activated: ${routes[routeId].name}`);
+          showNotification(`🚌 Buses will start moving on this route!`);
+        } else {
+          console.error('Failed to activate route:', result.message);
+          showNotification(`❌ Failed to activate route: ${result.message}`);
+        }
+        
+      } catch (error) {
+        console.error('Error updating route selection:', error);
+        
+        // Fallback: Show instructions for manual activation
+        showNotification(`🚌 Route ${routeId} Selected: ${routes[routeId].name}`);
+        showNotification(`⚠️ Manual: Change active_route.txt to "${routeId}"`, 5000);
+      }
+    }
+
+    async function getCurrentRoute() {
+      try {
+        const response = await fetch('http://localhost:3001/get-route');
+        const result = await response.json();
+        
+        if (result.success && result.currentRoute > 0) {
+          return result.currentRoute;
+        }
+      } catch (error) {
+        console.log('Route server not running - manual mode');
+      }
+      return null;
+    }
+
+    // Check current route status periodically
+    setInterval(async () => {
+      const currentRoute = await getCurrentRoute();
+      if (currentRoute && currentRoute !== parseInt(routeSelect.value)) {
+        // Update dropdown to match server state
+        routeSelect.value = currentRoute;
+        console.log(`🔄 Dashboard synced to active Route ${currentRoute}`);
+      }
+    }, 5000);
+
+    function showNotification(message, duration = 3000) {
+      // Create notification element
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #4a5568;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10000;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        transition: opacity 0.3s ease;
+        max-width: 300px;
+        word-wrap: break-word;
+      `;
+      notification.textContent = message;
+      
+      document.body.appendChild(notification);
+      
+      // Auto remove after duration
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        setTimeout(() => {
+          if (notification.parentNode) {
+            document.body.removeChild(notification);
+          }
+        }, 300);
+      }, duration);
+    }
+
+    function selectBus() {
+      const busSelect = document.getElementById('busSelect');
+      const busId = busSelect.value;
+      if (busId) {
+        selectBusById(parseInt(busId));
+      }
+    }
+
+    function selectBusById(busId) {
+      selectedBusId = busId;
+      trackingAllBuses = false;
+      updateBusDetails();
+      updateBusMarkers();
+      startStatusPolling();
+      
+      // Update dropdown selection
+      const busSelect = document.getElementById('busSelect');
+      busSelect.value = busId;
+      
+      // Focus map on selected bus if it has a position
+      if (busState[busId]) {
+        const marker = busState[busId];
+        const pos = marker.getLatLng();
+        if (pos.lat !== 0 || pos.lng !== 0) {
+          map.setView([pos.lat, pos.lng], 13);
+        }
+      }
+    }
+
+    function trackAllBuses() {
+      selectedBusId = null;
+      trackingAllBuses = true;
+      updateBusDetails();
+      updateBusMarkers();
+      startStatusPolling();
+      
+      // Reset dropdown selection
+      const busSelect = document.getElementById('busSelect');
+      busSelect.value = '';
+      
+      // Fit map to show all buses
+      if (currentRouteId && routeCoords[currentRouteId]) {
+        const bounds = L.latLngBounds(routeCoords[currentRouteId]);
+        map.fitBounds(bounds);
+      }
+    }
+
+    function updateBusDetails() {
+      const busDetailsDiv = document.getElementById('busDetails');
+      if (selectedBusId && buses[selectedBusId]) {
+        const bus = buses[selectedBusId];
+        busDetailsDiv.innerHTML = `
+          <div style="background: #e2e8f0; padding: 10px; border-radius: 5px; margin-top: 10px;">
+            <strong>🚌 ${bus.bus_number}</strong><br>
+            <strong>Route:</strong> ${routes[bus.route_id].name}<br>
+            <strong>Type:</strong> ${bus.details}<br>
+            <div style="margin-top: 8px; font-size: 0.9em; color: #4a5568;">
+              📍 Tracking individual bus
+            </div>
+          </div>
+        `;
+      } else if (trackingAllBuses) {
+        const routeBuses = Object.values(buses).filter(b => b.route_id == currentRouteId);
+        busDetailsDiv.innerHTML = `
+          <div style="background: #e2e8f0; padding: 10px; border-radius: 5px; margin-top: 10px;">
+            <strong>🚌 All Buses</strong><br>
+            <strong>Route:</strong> ${routes[currentRouteId].name}<br>
+            <strong>Count:</strong> ${routeBuses.length} buses<br>
+            <div style="margin-top: 8px; font-size: 0.9em; color: #4a5568;">
+              📍 Tracking all buses on route
+            </div>
+          </div>
+        `;
+      } else {
+        busDetailsDiv.innerHTML = '<em>Select a bus to see details or track all buses.</em>';
+      }
+    }
+
+    function updateBusMarkers() {
+      // Update marker colors based on selection
+      for (const id in busState) {
+        const marker = busState[id];
+        const isSelected = selectedBusId == id;
+        const color = isSelected ? '#e53e3e' : (trackingAllBuses ? '#38a169' : '#3182ce');
+        const zIndex = isSelected ? 1000 : 100;
+        
+        marker.setIcon(L.divIcon({
+          className: `custom-bus-icon ${isSelected ? 'bus-marker-selected' : ''}`,
+          html: `<i class="fa-solid fa-bus fa-2x" style="color:${color}; filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3)); z-index:${zIndex};"></i>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20]
+        }));
+      }
+    }
+
+    // Initialize - select first route and start polling
+    if (routeSelect.options.length > 0) {
+      routeSelect.selectedIndex = 0;
+    }
+    showBuses();
+    // stop polling when user leaves page
+    window.addEventListener('beforeunload', () => stopPolling());
+
+    // Make selectBusById globally accessible for popup buttons
+    window.selectBusById = selectBusById;
+  </script>
+</body>
+</html>
